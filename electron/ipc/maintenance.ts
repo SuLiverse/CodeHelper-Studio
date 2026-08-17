@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { mkdirSync, writeFileSync } from 'fs'
+import path from 'path'
 import {
   createVerifiedDatabaseBackup,
   getDatabaseBackupDirectory,
@@ -148,8 +149,14 @@ export function registerMaintenanceIPC(dependencies: MaintenanceIpcDependencies)
         if (result.canceled || !result.filePath) {
           return { success: false, error: 'User cancelled' }
         }
+        const exportPath = result.filePath.toLowerCase().endsWith('.json')
+          ? result.filePath
+          : `${result.filePath}.json`
+        if (path.extname(exportPath).toLowerCase() !== '.json') {
+          return { success: false, error: 'Recovery layer export must use a .json file' }
+        }
         writeFileSync(
-          result.filePath,
+          exportPath,
           `${JSON.stringify(
             {
               version: 1,
@@ -162,7 +169,7 @@ export function registerMaintenanceIPC(dependencies: MaintenanceIpcDependencies)
           )}\n`,
           'utf8',
         )
-        return { success: true, filePath: result.filePath, entryCount: entries.length }
+        return { success: true, filePath: exportPath, entryCount: entries.length }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }
       }

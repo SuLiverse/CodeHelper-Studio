@@ -56,6 +56,7 @@ function escapeHtml(value: string): string {
 function isSafeLegacyLink(href: string): boolean {
   const trimmed = href.trim()
   if (!trimmed) return false
+  if (trimmed.startsWith('//')) return false
   if (trimmed.startsWith('#') || trimmed.startsWith('/') || trimmed.startsWith('./')) return true
   try {
     const url = new URL(trimmed)

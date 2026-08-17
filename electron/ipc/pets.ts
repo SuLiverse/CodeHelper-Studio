@@ -10,6 +10,7 @@ import { registerIpcHandler, rateLimitMiddleware } from '../utils/middleware'
 const execFileAsync = promisify(execFile)
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const maxAssetBytes = 16 * 1024 * 1024
+const PET_DOWNLOAD_HOSTS = new Set(['codex-pet.org', 'www.codex-pet.org', 'assets.codex-pet.org'])
 
 interface CodexPetManifest {
   id?: string
@@ -92,12 +93,73 @@ async function fileDataUrl(filePath: string): Promise<string> {
   return `data:image/webp;base64,${bytes.toString('base64')}`
 }
 
-function spritesheetPathFor(dir: string, manifest: CodexPetManifest): string {
-  const relative = String(manifest.spritesheetPath || 'spritesheet.webp')
-  if (path.isAbsolute(relative) || relative.includes('..')) {
+export function isUnsafeZipEntry(rawEntry: string): boolean {
+  const entry = String(rawEntry).replace(/\\/g, '/').trim()
+  if (!entry) return false
+  return (
+    /^[a-zA-Z]:/.test(entry) ||
+    entry.startsWith('/') ||
+    entry.startsWith('//') ||
+    entry.split('/').some((segment) => segment === '..')
+  )
+}
+
+export function resolvePetAssetPath(dir: string, relativePath: unknown): string {
+  const relative = String(relativePath || 'spritesheet.webp')
+  const posix = relative
+    .replace(/\\/g, '/')
+    .replace(/^\.\/+/, '')
+    .trim()
+  if (!posix || posix === '.') throw new Error('spritesheetPath 无效')
+  if (
+    path.posix.isAbsolute(posix) ||
+    path.win32.isAbsolute(posix) ||
+    path.win32.isAbsolute(posix.replace(/\//g, '\\')) ||
+    /^[a-zA-Z]:/.test(posix) ||
+    posix.startsWith('//') ||
+    posix.startsWith('/') ||
+    posix.split('/').some((segment) => !segment || segment === '.' || segment === '..')
+  ) {
     throw new Error('spritesheetPath 无效')
   }
-  return path.join(dir, relative)
+  const resolvedDir = path.resolve(dir)
+  const resolved = path.resolve(resolvedDir, ...posix.split('/'))
+  const prefix = resolvedDir.endsWith(path.sep) ? resolvedDir : `${resolvedDir}${path.sep}`
+  if (resolved !== resolvedDir && !resolved.startsWith(prefix)) {
+    throw new Error('spritesheetPath 无效')
+  }
+  return resolved
+}
+
+function spritesheetPathFor(dir: string, manifest: CodexPetManifest): string {
+  return resolvePetAssetPath(dir, manifest.spritesheetPath || 'spritesheet.webp')
+}
+
+export function assertAllowedPetDownloadUrl(url: string, label: string): URL {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    throw new Error(`${label} 地址无效`)
+  }
+  if (parsed.protocol !== 'https:') throw new Error(`${label} 必须使用 https`)
+  if (parsed.username || parsed.password) throw new Error(`${label} 不得包含凭据`)
+  const host = parsed.hostname.toLowerCase().replace(/\.$/, '')
+  if (!PET_DOWNLOAD_HOSTS.has(host)) throw new Error(`${label} 只允许 codex-pet.org 资源`)
+  return parsed
+}
+
+async function fetchPinnedHttps(url: string, label: string): Promise<Response> {
+  const parsed = assertAllowedPetDownloadUrl(url, label)
+  const response = await fetch(parsed, {
+    redirect: 'manual',
+    signal: AbortSignal.timeout(30_000),
+  })
+  if (response.status >= 300 && response.status < 400) {
+    throw new Error(`${label} 不允许重定向`)
+  }
+  if (!response.ok) throw new Error(`下载 ${label} 失败: ${response.status}`)
+  return response
 }
 
 async function petFromDirectory(
@@ -139,10 +201,7 @@ async function listPets(): Promise<CodexPetDefinition[]> {
 }
 
 async function downloadBytes(url: string, label: string): Promise<Uint8Array> {
-  const parsed = new URL(url)
-  if (parsed.protocol !== 'https:') throw new Error(`${label} 必须使用 https`)
-  const response = await fetch(parsed, { signal: AbortSignal.timeout(30_000) })
-  if (!response.ok) throw new Error(`下载 ${label} 失败: ${response.status}`)
+  const response = await fetchPinnedHttps(url, label)
   const contentLength = Number(response.headers.get('content-length') || 0)
   if (contentLength > maxAssetBytes) throw new Error(`${label} 过大`)
   const bytes = new Uint8Array(await response.arrayBuffer())
@@ -154,8 +213,7 @@ async function fetchPublicAssetLinks(
   slug: string,
 ): Promise<{ manifestUrl: string; spritesheetUrl: string }> {
   const pageUrl = `https://codex-pet.org/pets/${slug}/`
-  const response = await fetch(pageUrl, { signal: AbortSignal.timeout(30_000) })
-  if (!response.ok) throw new Error(`查询 codex-pet.org 失败: ${response.status}`)
+  const response = await fetchPinnedHttps(pageUrl, 'codex-pet.org')
   const html = await response.text()
   const urls = Array.from(
     html.matchAll(/https:\/\/assets\.codex-pet\.org\/[^"'<>\\]+\/(?:pet\.json|spritesheet\.webp)/g),
@@ -227,14 +285,33 @@ async function importDirectory(directory: string): Promise<PetInstallResult> {
 
 export function validateZipEntries(entries: string[]): void {
   for (const rawEntry of entries) {
-    const entry = String(rawEntry).replace(/\\/g, '/').trim()
-    if (!entry) continue
-    if (
-      /^[a-zA-Z]:/.test(entry) ||
-      entry.startsWith('/') ||
-      entry.split('/').some((segment) => segment === '..')
-    ) {
+    if (isUnsafeZipEntry(rawEntry)) {
       throw new Error('ZIP 包包含非法路径，已拒绝导入')
+    }
+  }
+}
+
+function isPathInside(parent: string, child: string): boolean {
+  const resolvedParent = path.resolve(parent)
+  const resolvedChild = path.resolve(child)
+  const prefix = resolvedParent.endsWith(path.sep) ? resolvedParent : `${resolvedParent}${path.sep}`
+  return resolvedChild === resolvedParent || resolvedChild.startsWith(prefix)
+}
+
+async function assertExtractedTreeSafe(target: string): Promise<void> {
+  const stack = [target]
+  while (stack.length > 0) {
+    const current = stack.pop() as string
+    const entries = await readdir(current, { withFileTypes: true })
+    for (const entry of entries) {
+      const child = path.join(current, entry.name)
+      if (!isPathInside(target, child)) {
+        throw new Error('ZIP 包包含非法路径，已拒绝导入')
+      }
+      if (entry.isSymbolicLink() || (!entry.isFile() && !entry.isDirectory())) {
+        throw new Error('ZIP 包包含符号链接或特殊文件，已拒绝导入')
+      }
+      if (entry.isDirectory()) stack.push(child)
     }
   }
 }
@@ -245,8 +322,7 @@ const ZIP_ENTRY_LIST_SCRIPT = [
   'try { $zip.Entries | ForEach-Object { $_.FullName } } finally { $zip.Dispose() }',
 ].join('; ')
 
-async function extractZip(zipPath: string): Promise<string> {
-  const target = await mkdtemp(path.join(tmpdir(), 'codehelper-pet-'))
+async function listZipEntries(zipPath: string): Promise<string[]> {
   if (process.platform === 'win32') {
     const entryList = await execFileAsync('powershell.exe', [
       '-NoProfile',
@@ -255,11 +331,34 @@ async function extractZip(zipPath: string): Promise<string> {
       ZIP_ENTRY_LIST_SCRIPT,
       zipPath,
     ])
-    const entries = entryList.stdout
+    return entryList.stdout
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter(Boolean)
-    validateZipEntries(entries)
+  }
+
+  try {
+    const listed = await execFileAsync('unzip', ['-Z1', zipPath])
+    return listed.stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+  } catch {
+    const listed = await execFileAsync('unzip', ['-l', zipPath])
+    return listed.stdout
+      .split(/\r?\n/)
+      .slice(3)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith('---') && !/\sfiles?$/.test(line))
+      .map((line) => line.replace(/^\s*\d+\s+\d{2}-\d{2}-\d{4}\s+\d{2}:\d{2}\s+/, ''))
+      .filter(Boolean)
+  }
+}
+
+async function extractZip(zipPath: string): Promise<string> {
+  const target = await mkdtemp(path.join(tmpdir(), 'codehelper-pet-'))
+  validateZipEntries(await listZipEntries(zipPath))
+  if (process.platform === 'win32') {
     await execFileAsync('powershell.exe', [
       '-NoProfile',
       '-NonInteractive',
@@ -271,6 +370,7 @@ async function extractZip(zipPath: string): Promise<string> {
   } else {
     await execFileAsync('unzip', ['-q', zipPath, '-d', target])
   }
+  await assertExtractedTreeSafe(target)
   return target
 }
 

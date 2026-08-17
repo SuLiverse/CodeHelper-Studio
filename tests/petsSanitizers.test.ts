@@ -13,6 +13,9 @@ import {
   manifestId,
   displayName,
   validateZipEntries,
+  resolvePetAssetPath,
+  assertAllowedPetDownloadUrl,
+  isUnsafeZipEntry,
 } from '../electron/ipc/pets'
 import type { CodexPetManifest } from '../electron/ipc/pets'
 
@@ -150,5 +153,47 @@ describe('validateZipEntries (zip-slip 防护)', () => {
 
   it('忽略空条目行', () => {
     expect(() => validateZipEntries(['', 'pet.json', ' '])).not.toThrow()
+  })
+
+  it('拒绝 Windows 盘符相对路径与协议相对路径', () => {
+    expect(isUnsafeZipEntry('C:foo')).toBe(true)
+    expect(isUnsafeZipEntry('//evil/share/pet.json')).toBe(true)
+    expect(() => validateZipEntries(['C:foo'])).toThrow('ZIP 包包含非法路径')
+    expect(() => validateZipEntries(['//evil/share/pet.json'])).toThrow('ZIP 包包含非法路径')
+  })
+})
+
+describe('resolvePetAssetPath', () => {
+  it('接受相对资源路径', () => {
+    const resolved = resolvePetAssetPath('/tmp/pets/firefly', 'spritesheet.webp')
+    expect(resolved.replace(/\\/g, '/')).toMatch(/\/spritesheet\.webp$/)
+  })
+
+  it('拒绝绝对路径、盘符相对路径和穿越', () => {
+    expect(() => resolvePetAssetPath('/tmp/pets/firefly', '/etc/passwd')).toThrow('spritesheetPath')
+    expect(() => resolvePetAssetPath('/tmp/pets/firefly', 'C:foo')).toThrow('spritesheetPath')
+    expect(() => resolvePetAssetPath('/tmp/pets/firefly', '../escape.webp')).toThrow(
+      'spritesheetPath',
+    )
+    expect(() => resolvePetAssetPath('/tmp/pets/firefly', 'a/../../secret.webp')).toThrow(
+      'spritesheetPath',
+    )
+  })
+})
+
+describe('assertAllowedPetDownloadUrl', () => {
+  it('只允许 codex-pet.org HTTPS 资源', () => {
+    expect(
+      assertAllowedPetDownloadUrl('https://assets.codex-pet.org/pets/x/pet.json', 'pet.json').href,
+    ).toBe('https://assets.codex-pet.org/pets/x/pet.json')
+    expect(() => assertAllowedPetDownloadUrl('http://codex-pet.org/pets/x/', 'page')).toThrow(
+      'https',
+    )
+    expect(() =>
+      assertAllowedPetDownloadUrl('https://evil.example/pets/x/pet.json', 'pet.json'),
+    ).toThrow('只允许')
+    expect(() =>
+      assertAllowedPetDownloadUrl('https://user:pass@codex-pet.org/pets/x/', 'page'),
+    ).toThrow('凭据')
   })
 })

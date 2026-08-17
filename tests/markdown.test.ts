@@ -128,6 +128,12 @@ describe('renderMarkdown', () => {
       expect(result).not.toContain('<a')
       expect(result).toContain('[bad](javascript:alert(1))')
     })
+
+    it('does not render protocol-relative links', () => {
+      const result = renderMarkdown('[bad](//evil.example/track)')
+      expect(result).not.toContain('<a')
+      expect(result).toContain('[bad](//evil.example/track)')
+    })
   })
 
   // ---------------------------------------------------------------------------

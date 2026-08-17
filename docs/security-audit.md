@@ -31,8 +31,9 @@ CodeHelper 已具备较强的本地数据恢复、受控执行、Docker 强隔�
 | Windows 发布           | 未签名 Authenticode、安装和不可变资产门禁完整；仍缺少独立发布者身份信任                     |
 | 自动更新               | 只生成和验证 updater metadata；应用内检查、下载和安装未实现                                 |
 
-当前没有开放的 High 或 Low 安全发现。SEC-004 仍作为 1 个 Medium 兼容性风险接受项保留，SEC-003
-为已缓解信息项；其余 SEC-001/002/005/006/007/008 均已通过实现和自动化验证关闭。
+当前没有开放的 High 安全发现。SEC-003 为已缓解信息项；SEC-004 已从 Accepted 降为 Mitigated，
+仍需用户保存一次才能清掉磁盘上的遗留明文。SEC-001/002/005/006/007/008/009/010/011 均已通过
+实现和自动化验证关闭。
 
 ## 威胁模型
 
@@ -104,18 +105,16 @@ CodeHelper 已具备较强的本地数据恢复、受控执行、Docker 强隔�
 **状态**：Mitigated。异地复制、保留策略和人工恢复步骤见
 [备份与恢复手册](guides/backup-restore-runbook.md)。
 
-### SEC-004 [MEDIUM]：旧无前缀 API Key 仍按明文兼容读取
+### SEC-004 [MEDIUM]：旧无前缀 API Key 已可识别并提示重加密
 
-**证据**：新保存路径在 `safeStorage` 不可用或 Linux backend 为 `basic_text` 时抛错；但解密函数
-仍会直接返回不以 `enc:` 开头的旧值，以兼容历史数据库。
+**证据**：解密函数仍兼容读取不以 `enc:` 开头的历史明文，避免升级后无法使用旧库。但
+`db-get-ai-configs` / `db-get-default-ai-config` 现在返回 `legacy_plaintext_key`，设置页会
+提示用户保存一次以重加密，并建议轮换 API Key。任意一次成功保存都会走 `encryptApiKey`。
 
-**影响**：升级前曾以明文保存的 API Key 不会自动重加密。完整数据库备份或本机磁盘读取仍可能
-暴露这类遗留值。
+**残余边界**：未重新保存前，完整数据库备份或本机磁盘读取仍可能看到旧明文。跨设备完整备份
+不能保证凭据可解密。
 
-**要求**：能力状态或设置页应明确 secure storage 可用性；发现旧无前缀值时要求用户重新保存或
-轮换凭据。禁止把数据库、JSON 或日志上传到公开问题单。
-
-**状态**：Accepted compatibility risk，需迁移/轮换策略。
+**状态**：Mitigated，2026-08-17。仍需用户保存/轮换后才能清除磁盘上的遗留明文。
 
 ### SEC-005 [MEDIUM]：构建依赖 High advisory 已关闭
 
@@ -146,6 +145,30 @@ Vite 已升级到 `7.3.6`，其构建实例解析到 `esbuild@0.28.1`，不再�
 `GHSA-g7r4-m6w7-qqqr`。`electron-vite` 自身的 `esbuild@0.25.12` 不在受影响范围。
 
 **状态**：Fixed，2026-07-17。
+
+### SEC-009 [HIGH]：桌宠 ZIP 导入已在全平台校验路径并拒绝符号链接
+
+**证据**：非 Windows 原先直接 `unzip -q`，未走 `validateZipEntries`。现已在解压前列出 ZIP
+条目并拒绝 `..`、绝对路径、盘符相对路径和协议相对路径；解压后再遍历目录树，拒绝符号链接、
+特殊文件和逃逸到目标目录外的路径。`spritesheetPath` 也改为解析后校验，不再把 `C:foo` 这类
+Windows 盘符相对路径当成普通相对路径。
+
+**状态**：Fixed，2026-08-17。覆盖见 `tests/petsSanitizers.test.ts`。
+
+### SEC-010 [MEDIUM]：桌宠下载已钉扎主机并拒绝重定向
+
+**证据**：`pets-install-slug` 原先对 `codex-pet.org` / `assets.codex-pet.org` 使用默认
+`fetch`，会跟随 302。现只允许这三个主机的 HTTPS，拒绝凭据和重定向，避免把主进程变成开放
+下载代理。
+
+**状态**：Fixed，2026-08-17。
+
+### SEC-011 [LOW]：遗留 Markdown 协议相对链接已拒绝
+
+**证据**：`isSafeLegacyLink` 原先把 `//evil.example` 当成以 `/` 开头的相对路径。现与知识库
+链接校验一致，协议相对 URL 不再渲染为可点击链接。
+
+**状态**：Fixed，2026-08-17。覆盖见 `tests/markdown.test.ts`。
 
 ## 已验证控制
 
@@ -270,16 +293,19 @@ moderate 记录已经关闭，不能继续出现在风险接受表中。
 
 ## 风险接受与发布阻断
 
-| ID      | 状态     | 发布判断               | 重新检查条件                                     |
-| ------- | -------- | ---------------------- | ------------------------------------------------ |
-| SEC-001 | Fixed    | 不阻断                 | 保持导航守卫及 Electron 回归覆盖                 |
-| SEC-002 | Fixed    | 不阻断                 | 保持原始路径通道未注册，并保留对话框授权回归测试 |
-| SEC-003 | 已缓解   | 信息项                 | SQLite 快照、事务导入和数据边界继续保持回归覆盖  |
-| SEC-004 | Accepted | 不阻断，需凭据迁移提示 | 旧明文行迁移/轮换完成                            |
-| SEC-005 | Fixed    | 不阻断                 | 保持完整 audit 与 Windows package smoke          |
-| SEC-006 | Fixed    | 不阻断                 | 保持 CSP 指令回归覆盖                            |
-| SEC-007 | Fixed    | 不阻断                 | 保持 BrowserWindow 配置与 packaged smoke         |
-| SEC-008 | Fixed    | 不阻断                 | 依赖升级后持续运行完整 audit                     |
+| ID      | 状态   | 发布判断               | 重新检查条件                                     |
+| ------- | ------ | ---------------------- | ------------------------------------------------ |
+| SEC-001 | Fixed  | 不阻断                 | 保持导航守卫及 Electron 回归覆盖                 |
+| SEC-002 | Fixed  | 不阻断                 | 保持原始路径通道未注册，并保留对话框授权回归测试 |
+| SEC-003 | 已缓解 | 信息项                 | SQLite 快照、事务导入和数据边界继续保持回归覆盖  |
+| SEC-004 | 已缓解 | 不阻断，需用户保存一次 | 旧明文行全部重加密或轮换完成                     |
+| SEC-005 | Fixed  | 不阻断                 | 保持完整 audit 与 Windows package smoke          |
+| SEC-006 | Fixed  | 不阻断                 | 保持 CSP 指令回归覆盖                            |
+| SEC-007 | Fixed  | 不阻断                 | 保持 BrowserWindow 配置与 packaged smoke         |
+| SEC-008 | Fixed  | 不阻断                 | 依赖升级后持续运行完整 audit                     |
+| SEC-009 | Fixed  | 不阻断                 | 保持 ZIP 条目/解压后树校验回归                   |
+| SEC-010 | Fixed  | 不阻断                 | 保持桌宠下载主机钉扎与拒绝重定向                 |
+| SEC-011 | Fixed  | 不阻断                 | 保持协议相对链接拒绝回归                         |
 
 风险接受必须记录负责人、理由、到期时间和可达性证据。不能继续使用“当前无需立即修复”作为笼统
 结论。

@@ -13,11 +13,21 @@ import {
   isRedirect,
 } from '../utils/httpErrors'
 import type { AIConfigRow, AIConfigDecrypted } from '../types/db'
-import { decryptApiKey, encryptApiKey, isMaskedApiKey, maskApiKey } from '../utils/apiKeyStorage'
+import {
+  decryptApiKey,
+  encryptApiKey,
+  isLegacyPlaintextApiKey,
+  isMaskedApiKey,
+  maskApiKey,
+} from '../utils/apiKeyStorage'
 
-export { isMaskedApiKey, maskApiKey } from '../utils/apiKeyStorage'
+export { isLegacyPlaintextApiKey, isMaskedApiKey, maskApiKey } from '../utils/apiKeyStorage'
 
-type AIConfigPublic = Omit<AIConfigDecrypted, 'api_key'> & { api_key: string; has_api_key: boolean }
+type AIConfigPublic = Omit<AIConfigDecrypted, 'api_key'> & {
+  api_key: string
+  has_api_key: boolean
+  legacy_plaintext_key: boolean
+}
 const SETTINGS_VALUE_LIMIT = 10000
 const SETTINGS_LARGE_VALUE_LIMIT = 120000
 const LARGE_SETTING_KEYS = new Set(['user_avatar'])
@@ -34,6 +44,7 @@ function publicConfigRow(row: AIConfigRow | undefined | null): AIConfigPublic | 
     ...decrypted,
     api_key: maskApiKey(decrypted.api_key),
     has_api_key: Boolean(decrypted.api_key),
+    legacy_plaintext_key: isLegacyPlaintextApiKey(row?.api_key ?? ''),
   }
 }
 

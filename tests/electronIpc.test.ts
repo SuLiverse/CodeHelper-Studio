@@ -408,6 +408,7 @@ describe('registerDatabaseIPC', () => {
       expect(result[0].api_key).not.toBe('sk-live-secret')
       expect(result[0].api_key).toBe('********')
       expect(result[0].has_api_key).toBe(true)
+      expect(result[0].legacy_plaintext_key).toBe(true)
     })
   })
 
@@ -938,6 +939,7 @@ describe('registerDatabaseIPC', () => {
       expect(electron.safeStorage.decryptString).toHaveBeenCalled()
       expect(result[0].api_key).toBe('my-********-key')
       expect(result[0].has_api_key).toBe(true)
+      expect(result[0].legacy_plaintext_key).toBe(false)
     })
 
     it('returns empty string when decryption fails', async () => {
@@ -992,6 +994,7 @@ describe('registerDatabaseIPC', () => {
       const result = await handlers['db-get-ai-configs']()
       expect(result[0].api_key).toBe('********')
       expect(result[0].has_api_key).toBe(true)
+      expect(result[0].legacy_plaintext_key).toBe(true)
     })
   })
 

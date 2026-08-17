@@ -232,4 +232,23 @@ describe('maintenance IPC', () => {
       entries,
     })
   })
+
+  it('appends .json when the save dialog omits the extension', async () => {
+    const fs = await import('fs')
+    electronMocks.showSaveDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePath: 'C:\\Exports\\recovery',
+    })
+
+    const result = await handlers['recovery-layer-export'](null, [
+      { key: 'codehelper-editor.corrupt.1', value: 'broken' },
+    ])
+
+    expect(result).toEqual({
+      success: true,
+      filePath: 'C:\\Exports\\recovery.json',
+      entryCount: 1,
+    })
+    expect(vi.mocked(fs.writeFileSync).mock.calls.at(-1)?.[0]).toBe('C:\\Exports\\recovery.json')
+  })
 })

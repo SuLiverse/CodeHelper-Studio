@@ -8,6 +8,7 @@ export interface AIConfig {
   model: string
   api_key?: string
   has_api_key?: boolean
+  legacy_plaintext_key?: boolean
   is_default?: boolean
 }
 

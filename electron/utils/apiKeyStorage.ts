@@ -11,6 +11,10 @@ export function encryptApiKey(apiKey: string): string {
   return 'enc:' + safeStorage.encryptString(apiKey).toString('base64')
 }
 
+export function isLegacyPlaintextApiKey(value: string): boolean {
+  return Boolean(value) && !value.startsWith('enc:')
+}
+
 export function decryptApiKey(value: string): string {
   if (!value.startsWith('enc:')) return value
   try {

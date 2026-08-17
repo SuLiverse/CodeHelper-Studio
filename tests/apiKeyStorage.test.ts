@@ -15,7 +15,7 @@ vi.mock('electron', () => ({
   },
 }))
 
-import { encryptApiKey } from '../electron/utils/apiKeyStorage'
+import { encryptApiKey, isLegacyPlaintextApiKey } from '../electron/utils/apiKeyStorage'
 
 describe('encryptApiKey', () => {
   beforeEach(() => {
@@ -39,5 +39,13 @@ describe('encryptApiKey', () => {
     expect(encryptApiKey('sk-secret')).toBe(`enc:${Buffer.from('sk-secret').toString('base64')}`)
     expect(storage.encryptString).toHaveBeenCalledWith('sk-secret')
     platform.mockRestore()
+  })
+})
+
+describe('isLegacyPlaintextApiKey', () => {
+  it('treats unprefixed stored values as legacy plaintext', () => {
+    expect(isLegacyPlaintextApiKey('sk-plain')).toBe(true)
+    expect(isLegacyPlaintextApiKey('enc:abc')).toBe(false)
+    expect(isLegacyPlaintextApiKey('')).toBe(false)
   })
 })

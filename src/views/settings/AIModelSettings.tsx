@@ -273,6 +273,11 @@ export function AIModelSettings() {
                         默认
                       </span>
                     )}
+                    {cfg.legacy_plaintext_key && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#F59E0B]/15 text-[#F59E0B] font-medium shrink-0">
+                        需重新保存密钥
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-[var(--color-text-muted)] truncate">
                     {cfg.model} · {cfg.base_url}
@@ -360,6 +365,12 @@ export function AIModelSettings() {
               placeholder={editingId != null ? '留空表示不修改' : 'sk-...'}
               className={INPUT_CLS}
             />
+            {editingId != null &&
+              aiConfigs.some((cfg) => cfg.id === editingId && cfg.legacy_plaintext_key) && (
+                <p className="mt-1.5 text-xs text-[#F59E0B]">
+                  此配置仍是升级前的明文密钥。保存一次即可加密，建议同时轮换 API Key。
+                </p>
+              )}
           </div>
 
           <div>

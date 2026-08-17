@@ -1,8 +1,8 @@
 # CodeHelper 依赖审计报告
 
-> 审计日期：2026-08-01
+> 审计日期：2026-08-17
 >
-> 审计基线：工作树 HEAD `4cb4e6e5227785386d980a2323ded27485e02a59`（v2.4.1）及本地未提交增量
+> 审计基线：分支 `SuLi/security-hardening-optimize`，相对 v2.4.2 的安全加固增量
 >
 > 审计命令：`npm audit --omit=dev --json`、`npm audit --json`、`npm ls`
 
@@ -11,10 +11,10 @@
 
 ## 当前结果
 
-| 范围                   | Critical | High | Moderate | Low | 结论                            |
-| ---------------------- | -------: | ---: | -------: | --: | ------------------------------- |
-| `npm audit --omit=dev` |        0 |    0 |        0 |   0 | 生产依赖门禁通过                |
-| 完整 `npm audit`       |        1 |   23 |        0 |   0 | 均为开发/构建链，不进入打包产物 |
+| 范围                   | Critical | High | Moderate | Low | 结论                      |
+| ---------------------- | -------: | ---: | -------: | --: | ------------------------- |
+| `npm audit --omit=dev` |        0 |    0 |        0 |   0 | 生产依赖门禁通过          |
+| 完整 `npm audit`       |        0 |    0 |        0 |   0 | 开发/构建链当前无已知漏洞 |
 
 结果是时间点快照。正式发布应保存命令输出或 CI 日志，不能把本文数字永久当作最新状态。
 
@@ -58,6 +58,9 @@
 - `esbuild` Low（GHSA-g7r4-m6w7-qqqr）：Vite 使用其支持的 `esbuild@0.28.1`，已不再命中。
 - `vitest@3.2.6` / `@vitest/coverage-v8@3.2.6` critical：当前均为 `4.1.8`。
 - `monaco-editor -> dompurify` moderate：当前编辑器依赖链不再安装这两个包。
+- `undici@6.27.0` moderate/high：生产依赖已升级到 `6.28.0`。
+- `jsdom -> undici@7.28.0` high：overrides 钉到 `7.29.0`。
+- `nanoid@3.3.16` high：overrides 钉到 `3.3.18`。
 
 ## 关键依赖基线
 
